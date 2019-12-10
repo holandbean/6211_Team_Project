@@ -1,0 +1,82 @@
+
+#load data
+data_train <- read.csv("~/Documents/advanced business/project/home-credit-default-risk/data_train1.csv",sep=",", 
+                       header=T, strip.white = T, na.strings = c("NA","NaN","","?","XNA","NA's"))
+
+missing_data <- as.data.frame(sort(sapply(data_train, function(x) sum(is.na(x))),decreasing = T))                                                   
+colnames(missing_data)[1] <- "Missing_values"
+missing_data$Percentage <- (missing_data$Missing_values/nrow(data_train))*100      
+missing_data$Variables <- rownames(missing_data)
+missing_data <- missing_data[c(3,1,2)] 
+rownames(missing_data)<-c()                                        
+missing<-head(missing_data,41)
+missing<-missing$Variables
+
+
+data <- data_train %>%select (-c(missing))
+
+#########mICE
+library(tidyverse)
+data_train <- read.csv("~/Documents/advanced business/project/for_mice.csv",sep=",", 
+                       header=T, strip.white = T, na.strings = c("NA","NaN","","?","XNA","NA's"))
+
+data_train<-drop_na(data_train, AMT_GOODS_PRICE)
+data_train<-select(data_train, 
+                   -c('NAME_TYPE_SUITE','NAME_INCOME_TYPE','OCCUPATION_TYPE','ORGANIZATION_TYPE','EXT_SOURCE_2','EXT_SOURCE_3','YEARS_BEGINEXPLUATATION_AVG','FLOORSMAX_AVG','YEARS_BEGINEXPLUATATION_MODE','FLOORSMAX_MODE','YEARS_BEGINEXPLUATATION_MEDI','FLOORSMAX_MEDI','TOTALAREA_MODE','EMERGENCYSTATE_MODE'))
+data_train<-select(data_train,-c("OBS_30_CNT_SOCIAL_CIRCLE","DEF_30_CNT_SOCIAL_CIRCLE","OBS_60_CNT_SOCIAL_CIRCLE","DEF_60_CNT_SOCIAL_CIRCLE"))
+data_train<-select(data_train,-c('DAYS_LAST_PHONE_CHANGE'))
+data_train<-select(data_train,-c("AMT_REQ_CREDIT_BUREAU_HOUR","AMT_REQ_CREDIT_BUREAU_DAY","AMT_REQ_CREDIT_BUREAU_WEEK","AMT_REQ_CREDIT_BUREAU_MON"  
+,"AMT_REQ_CREDIT_BUREAU_QRT","AMT_REQ_CREDIT_BUREAU_YEAR"))  
+library(mice)
+attributes(data_train)
+data1<-mice(data_train, method = "cart")
+data_train_1<-complete(data1)
+write.csv(data_train_1, file = "after_mice.csv")
+data_train_1 <- read.csv("~/Documents/advanced business/project/project/after_mice.csv",sep=",", 
+                       header=T, strip.white = T, na.strings = c("NA","NaN","","?","XNA","NA's"))
+
+data_train_1 <- data_train_1[-c(1:4)]
+md.pattern(data_train)
+###############factors
+
+columns <- c(1:5,11:13,19:24,30:55)
+data_train_1[,columns] <- lapply(data_train_1[,columns] , factor)
+str(data_train_1)
+summary(data_train_1)
+write.csv(data_train_1, file = "model_ready")
+#####random forest
+library(randomForest)
+rf <-randomForest(TARGET~., data=data_train_1, ntree=2, na.action=na.exclude, importance=T,
+                  proximity=T) 
+print(rf)
+
+#######################resample
+data_train <- read.csv("~/Documents/advanced business/project/project/model_ready.csv",sep=",", 
+                       header=T, strip.white = T, na.strings = c("NA","NaN","","?","XNA","NA's"))
+
+yes<-subset(data_train, TARGET == 1)
+no<-subset(data_train, TARGET == 0)
+index <- sample(1:nrow(yes), 0.8*24803)
+train_yes<-yes[index, ]
+library(dplyr)
+test_yes<-anti_join(yes, train_yes, by='X')
+
+index2 <- sample(1:nrow(no), 0.8*282408)
+train_no<-no[index2, ]
+test_no<-anti_join(no, train_no, by='X')
+
+train_resample<-union(train_no, train_yes)
+test_resample<-union(test_no, test_yes)
+write.csv(train_resample, file = "train_resample.csv")
+write.csv(test_resample, file = "test_resample.csv")
+
+######################drop not related variables
+train_resample <- read.csv("~/Documents/advanced business/project/project/train_resample.csv",sep=",", 
+                       header=T, strip.white = T, na.strings = c("NA","NaN","","?","XNA","NA's"))
+train_resample<- subset(train_resample, select=-c(FLAG_DOCUMENT_2, FLAG_DOCUMENT_12, FLAG_MOBIL,X.1))
+library(h2o)
+h2o.init()
+
+summary(data_train)
+library(Boruta)
+boruta <- Boruta(TARGET~., data = data_train, doTrace = 2)
